@@ -23,6 +23,8 @@ USER 1000
 WORKDIR $BUILD_HOME
 COPY src ./src
 COPY ./pom.xml .
+#TODO: copy jar from public backend image
+#COPY ./damap-backend-versionnumber-SNAPSHOT.jar /home/app/.m2/repository/at/ac/tuwien/damap-backend/versionnumber-SNAPSHOT/damap-backend-versionnumber-SNAPSHOT.jar
 
 VOLUME ["/home/app/.m2/repository"]
 RUN mvn -Duser.home=$BUILD_HOME -B package -DskipTests -Dquarkus.profile=${BUILD_PROFILE}

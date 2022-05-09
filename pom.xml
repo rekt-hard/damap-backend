@@ -25,13 +25,24 @@
     <quarkus.platform.group-id>io.quarkus</quarkus.platform.group-id>
     <quarkus.platform.version>2.4.1.Final</quarkus.platform.version>
     <sonar.version>3.9.0.2155</sonar.version>
+    <repo.owner>tuwien-csd</repo.owner>
   </properties>
+
+  <repositories>
+    <repository>
+      <id>github</id>
+      <url>https://maven.pkg.github.com/${repo.owner}/${artifactId}</url>
+      <snapshots>
+        <enabled>true</enabled>
+      </snapshots>
+    </repository>
+  </repositories>
 
   <distributionManagement>
     <repository>
       <id>github</id>
-      <name>tuwien-csd</name>
-      <url>https://maven.pkg.github.com/tuwien-csd/damap-backend</url>
+      <name>CSD Github</name>
+      <url>https://maven.pkg.github.com/${repo.owner}/${artifactId}</url>
     </repository>
   </distributionManagement>
 

@@ -9,8 +9,8 @@
 
   <scm>
     <url>https://github.com/tuwien-csd/damap-backend</url>
-    <connection>scm:git:ssh://git@github.com/tuwien-csd/damap-backend.git</connection>
-    <developerConnection>scm:git:ssh://git@github.com/tuwien-csd/damap-backend.git</developerConnection>
+    <connection>scm:git:https://github.com/tuwien-csd/damap-backend.git</connection>
+    <developerConnection>scm:git:https://github.com/tuwien-csd/damap-backend.git</developerConnection>
   </scm>
 
   <properties>

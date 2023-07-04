@@ -1,5 +1,9 @@
 package at.ac.tuwien.damap.rest.invenioDamap;
 
+import java.net.URI;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -16,8 +20,11 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
 
-import org.apache.james.mime4j.dom.datetime.DateTime;
+import org.apache.http.ssl.SSLContexts;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.rest.client.RestClientBuilder;
+import org.eclipse.microprofile.rest.client.RestClientDefinitionException;
+import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.resteasy.annotations.jaxrs.PathParam;
 
 import at.ac.tuwien.damap.domain.Access;
@@ -66,8 +73,15 @@ public class InvenioDAMAPResource {
     @Inject
     VersionService versionService;
 
+    @Inject
+    @RestClient
+    InvenioRemoteService invenioRemoteService;
+
     @ConfigProperty(name = "invenio.shared-secret")
     String sharedSecret;
+
+    @ConfigProperty(name = "invenio.base-url")
+    String invenioBaseUrl;
 
     /*
      * Maybe make it configurable?
@@ -104,6 +118,55 @@ public class InvenioDAMAPResource {
     }
 
     @POST
+    @Path("/{dmpId}/dataset/{datasetId}")
+    public DmpDO addInvenioDraftFromDataset(@PathParam long dmpId, @PathParam long datasetId) {
+        DmpDO dmpDO = dmpService.getDmpById(dmpId);
+
+        var dmpDatasets = dmpDO.getDatasets();
+        DatasetDO dataset = dmpDatasets.stream().filter((ds) -> {
+            return ds.getId() == datasetId;
+        }).findFirst().get();
+
+        try {
+            // TODO: find other method to accept certain URLs
+            // TODO: in general, this should not be necessary and we should be able to directly use the injected invenioRemoteService
+            InvenioRemoteService restClient = RestClientBuilder.newBuilder()
+                    .baseUri(URI.create(this.invenioBaseUrl))
+                    .sslContext(SSLContexts.custom().loadTrustMaterial((chain, authType) -> true).build())
+                    .hostnameVerifier((hostname, session) -> {
+                        log.error("hostname verifier");
+                        return true;
+                    })
+                    .build(InvenioRemoteService.class);
+
+            var datasetFromInvenio = restClient.createDraftForDataset(dmpDO.getId(), dataset.getTitle(),
+                    dataset.getDescription());
+
+            dmpDatasets.forEach((ds) -> {
+                if (!ds.getId().equals(datasetId))
+                    return;
+                var datasetRdmId = datasetFromInvenio.getDatasetId();
+                if (datasetRdmId != null) {
+                    IdentifierDO newId = new IdentifierDO();
+                    newId.setIdentifier(datasetRdmId.getIdentifier());
+                    newId.setType(EIdentifierType.valueOf(datasetRdmId.getType().name().toUpperCase()));
+                    ds.setDatasetId(newId);
+                }
+
+            });
+
+            dmpDO.setDatasets(dmpDatasets);
+            dmpDO = dmpService.update(dmpDO);
+
+        } catch (KeyManagementException | IllegalStateException | RestClientDefinitionException
+                | NoSuchAlgorithmException | KeyStoreException e) {
+            e.printStackTrace();
+        }
+
+        return dmpDO;
+    }
+
+    @POST
     @Path("/{id}/{personId}")
     @Consumes(MediaType.APPLICATION_JSON)
     public DmpDO addDataSetToDMP(@PathParam long id, @PathParam String personId, Dataset dataset,
@@ -124,12 +187,29 @@ public class InvenioDAMAPResource {
         DmpDO dmpDO = dmpService.getDmpById(id);
         var datasetDO = mapMaDMPDatasetToDatasetDO(dmpDO, new DatasetDO(), dataset, null);
 
-        dmpDO.getDatasets().add(datasetDO);
+        boolean alreadyAdded = false;
+        for (int i = 0; i < dmpDO.getDatasets().size(); ++i) {
+            var d = dmpDO.getDatasets().get(i);
+            if (d.getDatasetId() != null && datasetDO.getDatasetId() != null) {
+                var dIdentifier = d.getDatasetId().getIdentifier();
+                var datasetIdentifier = datasetDO.getDatasetId().getIdentifier();
+                if (dIdentifier.equals(datasetIdentifier)
+                        || dIdentifier.replace("uploads", "records").equals(datasetIdentifier)) {
+                    alreadyAdded = true;
+                    dmpDO.getDatasets().set(i, datasetDO);
+                }
+            }
+        }
+        if (!alreadyAdded) {
+            dmpDO.getDatasets().add(datasetDO);
+        }
+
         dmpDO = dmpService.update(dmpDO);
 
         VersionDO version = new VersionDO();
-        version.setDmpId(id);        
-        version.setVersionName(MessageFormat.format("Added dataset `{0}` from remote datasource", dataset.getTitle()));
+        version.setDmpId(id);
+        version.setVersionName(MessageFormat.format("{0} dataset `{1}` from remote datasource",
+                alreadyAdded ? "Updated" : "Added", dataset.getTitle()));
         version.setVersionDate(new Date());
         versionService.create(version);
 
@@ -156,7 +236,7 @@ public class InvenioDAMAPResource {
         datasetDO.setDeletionPerson(null);
         datasetDO.setDescription(madmpDataset.getDescription());
         datasetDO.setLegalRestrictions(null);
-        datasetDO.setLicense("");
+        datasetDO.setLicense(null);
         datasetDO.setSize(0L);
         // General TODO: some attributes have to be set from distribution
         if (madmpDataset.getDistribution() != null) {
@@ -172,7 +252,7 @@ public class InvenioDAMAPResource {
                         .map(l -> l.getLicenseRef().toString()).collect(Collectors.joining(", ")));
                 datasetDO.setSize(datasetDO.getSize() + d.getByteSize());
             });
-            datasetDO.setLicense(licenseBuilder.toString());
+            // datasetDO.setLicense(licenseBuilder.toString());
         }
 
         datasetDO.setOtherProjectMembersAccess(EAccessRight.READ);
